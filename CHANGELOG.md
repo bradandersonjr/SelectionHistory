@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Selections made while a command is running are now captured. Fusion's
+  selection-changed event only fires for the Select command, so nothing picked
+  during sketch editing — the case this add-in exists for — was ever recorded.
+  The selection is now also read when a command terminates.
+
 ### Changed
 
 - Each document now keeps its own selection history instead of the stack being

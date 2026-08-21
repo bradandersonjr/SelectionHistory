@@ -165,6 +165,33 @@ class SelectionHistoryDocumentClosingHandler(adsk.core.DocumentEventHandler):
             _log(traceback.format_exc())
 
 
+class SelectionHistoryCommandTerminatedHandler(
+        adsk.core.ApplicationCommandEventHandler):
+    def notify(self, args):
+        try:
+            # activeSelectionChanged only fires for the Select command, so
+            # nothing picked while another command is running is ever seen —
+            # and sketch editing is itself a running command, which covers most
+            # of the work this add-in exists for. Reading the selection when a
+            # command ends is the only way to capture those picks.
+            command_id = ''
+            try:
+                command_id = adsk.core.ApplicationCommandEventArgs.cast(
+                    args).commandId
+            except Exception:
+                pass
+
+            # Skip this add-in's own command: restore_selection() has already
+            # set the selection deliberately, and recording it here would push
+            # the entry just replayed back onto the top of the stack.
+            if command_id == CMD_ID:
+                return
+
+            record_selection(f'after {command_id or "a command"}')
+        except Exception:
+            _log(traceback.format_exc())
+
+
 class SelectionHistoryCommandExecuteHandler(adsk.core.CommandEventHandler):
     def notify(self, args):
         try:
@@ -281,6 +308,8 @@ def _add_selection_watcher():
          SelectionHistoryDocumentActivatedHandler(), 'document switches'),
         (_app.documentClosing,
          SelectionHistoryDocumentClosingHandler(), 'document closes'),
+        (_ui.commandTerminated,
+         SelectionHistoryCommandTerminatedHandler(), 'command completion'),
     ):
         try:
             event.add(handler)
@@ -313,6 +342,12 @@ def _remove_selection_watcher():
             elif isinstance(handler, SelectionHistoryDocumentClosingHandler):
                 try:
                     _app.documentClosing.remove(handler)
+                except Exception:
+                    pass
+            elif isinstance(handler,
+                            SelectionHistoryCommandTerminatedHandler):
+                try:
+                    _ui.commandTerminated.remove(handler)
                 except Exception:
                     pass
     except Exception:
@@ -500,7 +535,7 @@ def forget_document(args):
     _log('Document closed; forgot its selection history.')
 
 
-def record_selection():
+def record_selection(source='selection'):
     """Pushes the current selection onto the history stack when the user changes it."""
     global _history_cursor, _restored_entities
 
@@ -524,7 +559,7 @@ def record_selection():
         # something to restore.
         return
 
-    _log(f'Selection event: {len(entities)} entities.')
+    _log(f'{source}: {len(entities)} entities selected.')
 
     # Fusion delivers this event asynchronously, so a restore's own events land
     # after restore_selection() has returned and lowered the _restoring flag —

@@ -59,6 +59,14 @@ renders as an empty gap.
 restore selections it watched you make, so nothing is remembered from before it
 started.
 
+> [!IMPORTANT]
+> Fusion only reports selection changes while its **Select** command is
+> running — the default state when no other command is active. Anything picked
+> while a command is open, **including sketch edit mode**, is invisible to that
+> event. The add-in therefore also reads the selection whenever a command
+> finishes, which is what captures picks made while sketching. A selection made
+> and cleared entirely inside one command can still be missed.
+
 ## How it works
 
 The add-in subscribes to Fusion's `activeSelectionChanged` event and keeps a
@@ -96,6 +104,10 @@ Behavior notes:
   falls through to an older one rather than selecting the wrong geometry.
 - If every entity in an entry is gone, that entry is dropped and the next one
   back is tried, so a stale entry cannot block the stack permanently.
+- Selections are captured two ways: from Fusion's selection-changed event while
+  no command is running, and by reading the selection whenever a command
+  finishes. The second path is what sees picks made in sketch edit mode, since
+  sketching is itself a running command and suppresses the first.
 - Each document keeps its own history. Switching documents parks the current
   one and swaps in whatever that document had, so going away and coming back
   finds the stack intact. A remembered entity means nothing outside the design
