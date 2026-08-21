@@ -64,9 +64,16 @@ _history_cursor = None
 # the active document changes rather than kept per document, because holding
 # entity references from a closed document would keep it alive in memory.
 #
-# Compared by identity rather than by name: two unsaved documents can share a
-# name, and Document exposes no stable id until it has been saved.
-_history_document = None
+# Keyed on Document.creationId rather than on the Document object: Fusion
+# returns a new Python wrapper on each access, so comparing objects reports a
+# document switch on every single event. Names are no good either — two unsaved
+# documents can share one — while the creation ID is constant for the life of a
+# document and exists before it has ever been saved.
+#
+# _NO_DOCUMENT is a distinct sentinel rather than None so that "no document is
+# open" never compares equal to the initial "nothing recorded yet" state.
+_NO_DOCUMENT = object()
+_history_document = _NO_DOCUMENT
 
 # A restore edits the selection, which raises the very event the add-in listens
 # to. Left unguarded it would record its own work as fresh history and stepping
@@ -307,7 +314,7 @@ def stop(context):
         _handlers.clear()
         _history.clear()
         _restored_entities.clear()
-        _history_document = None
+        _history_document = _NO_DOCUMENT
         _log('Add-in stopped.')
     except Exception:
         pass
@@ -395,13 +402,17 @@ def _sync_history_document():
     global _history_document, _history_cursor, _restored_entities
 
     try:
-        document = _app.activeDocument
+        # creationId, not the Document object: Fusion hands back a new Python
+        # wrapper on every access, so comparing objects reports a switch on
+        # every event and wipes the history continuously. The creation ID is
+        # constant for the life of a document and exists before it is saved.
+        document = _app.activeDocument.creationId
     except Exception:
         # Fusion raises rather than returning None when no document is open,
         # such as during startup or after the last tab is closed.
-        document = None
+        document = _NO_DOCUMENT
 
-    if document is _history_document:
+    if document == _history_document:
         return
 
     if _history:

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- History is no longer discarded on every selection event. The active document
+  was compared by object identity, but Fusion returns a new wrapper on each
+  access, so every event looked like a document switch and wiped the stack —
+  leaving it permanently one entry deep. Documents are now keyed on
+  `Document.creationId`, which is stable for the life of a document.
+
 - Restoring no longer selects the wrong geometry after a regeneration. A spline
   handle whose curve was rebuilt by a constraint is accepted by Fusion and
   silently resolved to the parent spline; each entity is now read back after
