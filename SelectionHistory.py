@@ -270,22 +270,25 @@ def _add_command():
 
 def _add_selection_watcher():
     """Subscribes to the selection and document events the history depends on."""
-    try:
-        on_selection = SelectionHistoryActiveSelectionHandler()
-        _ui.activeSelectionChanged.add(on_selection)
-        _handlers.append(on_selection)
+    # Each subscription stands alone. Sharing one try block means a failure in
+    # any of them skips the rest, which would leave the add-in half-wired —
+    # silently recording nothing, or recording without ever scoping to a
+    # document — with only a log line to say so.
+    for event, handler, description in (
+        (_ui.activeSelectionChanged,
+         SelectionHistoryActiveSelectionHandler(), 'the active selection'),
+        (_app.documentActivated,
+         SelectionHistoryDocumentActivatedHandler(), 'document switches'),
+        (_app.documentClosing,
+         SelectionHistoryDocumentClosingHandler(), 'document closes'),
+    ):
+        try:
+            event.add(handler)
+            _handlers.append(handler)
+        except Exception:
+            _log(f'Failed to watch {description}: {traceback.format_exc()}')
 
-        on_document = SelectionHistoryDocumentActivatedHandler()
-        _app.documentActivated.add(on_document)
-        _handlers.append(on_document)
-
-        on_closing = SelectionHistoryDocumentClosingHandler()
-        _app.documentClosing.add(on_closing)
-        _handlers.append(on_closing)
-
-        _log('Watching the active selection.')
-    except Exception:
-        _log(f'Failed to watch the selection: {traceback.format_exc()}')
+    _log(f'Watching the active selection ({len(_handlers)} handlers).')
 
 
 def _remove_selection_watcher():
@@ -322,6 +325,10 @@ def run(context):
     try:
         _app = adsk.core.Application.get()
         _ui = _app.userInterface
+
+        # Logged before any work, so an empty Text Commands panel means the
+        # add-in never ran at all rather than that it ran and stayed quiet.
+        _log(f'Starting version {__version__}.')
 
         _add_command()
         _add_selection_watcher()
@@ -516,6 +523,8 @@ def record_selection():
         # worth remembering. Leave the stack untouched so the hotkey still has
         # something to restore.
         return
+
+    _log(f'Selection event: {len(entities)} entities.')
 
     # Fusion delivers this event asynchronously, so a restore's own events land
     # after restore_selection() has returned and lowered the _restoring flag —
