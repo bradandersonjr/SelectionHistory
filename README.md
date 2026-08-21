@@ -88,6 +88,12 @@ Behavior notes:
   somewhere new rather than restoring what is already on screen.
 - Entities deleted since they were recorded are skipped, and the rest of the
   set is still restored.
+- Some entities are not deleted but *regenerated* — applying a constraint to a
+  spline handle rebuilds the curve, replacing its handles. Fusion accepts the
+  old reference and silently resolves it to the surviving parent, which would
+  select the spline instead of the handles you picked. Each restored entity is
+  read back and dropped if Fusion substituted something else, so a stale entry
+  falls through to an older one rather than selecting the wrong geometry.
 - If every entity in an entry is gone, that entry is dropped and the next one
   back is tried, so a stale entry cannot block the stack permanently.
 - History belongs to a single document. Switching to another document discards

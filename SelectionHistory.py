@@ -340,12 +340,7 @@ def _same_entities(left, right):
     remaining = list(right)
     for entity in left:
         for index, candidate in enumerate(remaining):
-            try:
-                matched = entity == candidate
-            except Exception:
-                matched = False
-
-            if matched:
+            if _is_same_entity(entity, candidate):
                 del remaining[index]
                 break
         else:
@@ -354,17 +349,34 @@ def _same_entities(left, right):
     return True
 
 
+def _is_same_entity(left, right):
+    """Returns True when two entity references point at the same object."""
+    try:
+        if left == right:
+            return True
+    except Exception:
+        # Comparison itself can raise once one side has been invalidated.
+        return False
+
+    # Two references to one entity are not always the same Python object, so
+    # fall back to the token Fusion uses to identify geometry across rebuilds.
+    # Not every entity exposes one, and reading it from a dead reference can
+    # raise, so a failure here just means "cannot prove they match".
+    try:
+        left_token = left.entityToken
+        right_token = right.entityToken
+    except Exception:
+        return False
+
+    return bool(left_token) and left_token == right_token
+
+
 def _is_within(candidate, existing):
     """Returns True when every entity in candidate also appears in existing."""
     remaining = list(existing)
     for entity in candidate:
         for index, other in enumerate(remaining):
-            try:
-                matched = entity == other
-            except Exception:
-                matched = False
-
-            if matched:
+            if _is_same_entity(entity, other):
                 del remaining[index]
                 break
         else:
@@ -526,13 +538,34 @@ def restore_selection():
 
         restored = []
         for entity in entities:
-            # An entity deleted since it was recorded raises on reselect. Skip
-            # it and restore the rest rather than losing the whole set.
+            # A deleted entity usually raises on reselect, but not always: an
+            # entity whose owner regenerated — a spline handle after a
+            # constraint reshapes the curve — can be accepted and silently
+            # resolved to the surviving parent instead. Adding one at a time
+            # and reading back what actually landed is the only way to tell,
+            # since sketch entities expose no validity flag to test up front.
             try:
+                before = selections.count
                 selections.add(entity)
-                restored.append(entity)
             except Exception:
                 continue
+
+            if selections.count == before:
+                # Fusion rejected it without raising.
+                continue
+
+            try:
+                added = selections.item(selections.count - 1).entity
+            except Exception:
+                added = None
+
+            if added is None or not _is_same_entity(added, entity):
+                # Fusion substituted something else, so this is not the entity
+                # that was remembered. Drop it rather than selecting geometry
+                # the user never picked.
+                continue
+
+            restored.append(entity)
     finally:
         # Cleared unconditionally: leaving this True would silently stop all
         # further history recording for the rest of the session. Late-arriving

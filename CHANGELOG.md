@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Restoring no longer selects the wrong geometry after a regeneration. A spline
+  handle whose curve was rebuilt by a constraint is accepted by Fusion and
+  silently resolved to the parent spline; each entity is now read back after
+  being added and dropped if Fusion substituted something else.
+
 - History no longer carries across documents. Selections remembered in one
   design could previously be restored into another, where the entity references
   are stale — the stack is now discarded whenever the active document changes.
