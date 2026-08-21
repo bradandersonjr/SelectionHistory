@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- History no longer carries across documents. Selections remembered in one
+  design could previously be restored into another, where the entity references
+  are stale — the stack is now discarded whenever the active document changes.
+
 ## [1.0.0] - 2026-08-21
 
 ### Added

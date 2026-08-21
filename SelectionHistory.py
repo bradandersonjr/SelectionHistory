@@ -18,6 +18,10 @@ in the stack is a whole finished selection, not a stage of one being assembled:
 a set that grows or shrinks from the newest entry replaces it in place, and only
 a genuinely different selection starts a new entry.
 
+History belongs to one document. Entities only mean anything inside the design
+that owns them, so switching documents discards the stack rather than risking a
+restore of references that are stale in the document now on screen.
+
 The command works whether or not something is currently selected. A live
 selection is treated as the point being stepped back from: if it matches the
 newest remembered entry, that entry is skipped so the first press moves
@@ -52,6 +56,17 @@ _handlers = []
 # since the last restore, which is what restarts stepping from the top.
 _history = []
 _history_cursor = None
+
+# The document the history belongs to. Entities are only meaningful inside the
+# document that owns them, so a set remembered in one design must never be
+# restored into another — the references are stale there and reselecting them
+# fails or, worse, resolves to something unrelated. History is dropped whenever
+# the active document changes rather than kept per document, because holding
+# entity references from a closed document would keep it alive in memory.
+#
+# Compared by identity rather than by name: two unsaved documents can share a
+# name, and Document exposes no stable id until it has been saved.
+_history_document = None
 
 # A restore edits the selection, which raises the very event the add-in listens
 # to. Left unguarded it would record its own work as fresh history and stepping
@@ -107,6 +122,17 @@ class SelectionHistoryActiveSelectionHandler(
     def notify(self, args):
         try:
             record_selection()
+        except Exception:
+            _log(traceback.format_exc())
+
+
+class SelectionHistoryDocumentActivatedHandler(
+        adsk.core.DocumentEventHandler):
+    def notify(self, args):
+        try:
+            # Clearing here rather than waiting for the next selection event
+            # releases the old document's entity references promptly.
+            _sync_history_document()
         except Exception:
             _log(traceback.format_exc())
 
@@ -215,11 +241,15 @@ def _add_command():
 
 
 def _add_selection_watcher():
-    """Subscribes to the active selection changed event that feeds the history."""
+    """Subscribes to the selection and document events the history depends on."""
     try:
         on_selection = SelectionHistoryActiveSelectionHandler()
         _ui.activeSelectionChanged.add(on_selection)
         _handlers.append(on_selection)
+
+        on_document = SelectionHistoryDocumentActivatedHandler()
+        _app.documentActivated.add(on_document)
+        _handlers.append(on_document)
 
         _log('Watching the active selection.')
     except Exception:
@@ -227,17 +257,22 @@ def _add_selection_watcher():
 
 
 def _remove_selection_watcher():
-    """Unsubscribes every selection handler this add-in registered."""
+    """Unsubscribes the selection and document handlers this add-in registered."""
     try:
         if not _ui:
             return
 
         for handler in _handlers:
+            # Best effort only: if Fusion is already tearing down the event,
+            # the handler dies with it and nothing is leaked.
             if isinstance(handler, SelectionHistoryActiveSelectionHandler):
-                # Best effort only: if Fusion is already tearing down the
-                # event, the handler dies with it and nothing is leaked.
                 try:
                     _ui.activeSelectionChanged.remove(handler)
+                except Exception:
+                    pass
+            elif isinstance(handler, SelectionHistoryDocumentActivatedHandler):
+                try:
+                    _app.documentActivated.remove(handler)
                 except Exception:
                     pass
     except Exception:
@@ -264,12 +299,15 @@ def run(context):
 
 
 def stop(context):
+    global _history_document
+
     try:
         _remove_selection_watcher()
         _remove_command()
         _handlers.clear()
         _history.clear()
         _restored_entities.clear()
+        _history_document = None
         _log('Add-in stopped.')
     except Exception:
         pass
@@ -340,6 +378,29 @@ def _is_superset(candidate, existing):
     return len(candidate) > len(existing) and _is_within(existing, candidate)
 
 
+def _sync_history_document():
+    """Discards the history when the active document is not the one it came from."""
+    global _history_document, _history_cursor, _restored_entities
+
+    try:
+        document = _app.activeDocument
+    except Exception:
+        # Fusion raises rather than returning None when no document is open,
+        # such as during startup or after the last tab is closed.
+        document = None
+
+    if document is _history_document:
+        return
+
+    if _history:
+        _log('Active document changed; discarding the selection history.')
+
+    _history.clear()
+    _history_cursor = None
+    _restored_entities = []
+    _history_document = document
+
+
 def record_selection():
     """Pushes the current selection onto the history stack when the user changes it."""
     global _history_cursor, _restored_entities
@@ -351,6 +412,10 @@ def record_selection():
     # entry just replayed would be pushed back on top and stepping would stall.
     if _restoring:
         return
+
+    # Before anything reads or writes the stack, make sure it belongs to the
+    # document currently on screen.
+    _sync_history_document()
 
     entities = _current_entities()
 
@@ -418,6 +483,8 @@ def restore_selection():
 
     if not _ui:
         return
+
+    _sync_history_document()
 
     if not _history:
         # Silent no-op is better for a keyboard shortcut.

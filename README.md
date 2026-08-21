@@ -90,6 +90,9 @@ Behavior notes:
   set is still restored.
 - If every entity in an entry is gone, that entry is dropped and the next one
   back is tried, so a stale entry cannot block the stack permanently.
+- History belongs to a single document. Switching to another document discards
+  it, because a remembered entity means nothing outside the design that owns it
+  — restoring one there would fail or resolve to something unrelated.
 - History lives in memory only. It is cleared when the add-in stops and is not
   saved between Fusion sessions.
 
