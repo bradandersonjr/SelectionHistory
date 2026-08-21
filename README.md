@@ -96,9 +96,13 @@ Behavior notes:
   falls through to an older one rather than selecting the wrong geometry.
 - If every entity in an entry is gone, that entry is dropped and the next one
   back is tried, so a stale entry cannot block the stack permanently.
-- History belongs to a single document. Switching to another document discards
-  it, because a remembered entity means nothing outside the design that owns it
-  — restoring one there would fail or resolve to something unrelated.
+- Each document keeps its own history. Switching documents parks the current
+  one and swaps in whatever that document had, so going away and coming back
+  finds the stack intact. A remembered entity means nothing outside the design
+  that owns it, so histories are never shared between documents.
+- Closing a document forgets its history, which is what keeps the add-in from
+  holding a closed design's geometry in memory. At most `MAX_DOCUMENTS`
+  inactive documents keep a parked history; beyond that the oldest is dropped.
 - History lives in memory only. It is cleared when the add-in stops and is not
   saved between Fusion sessions.
 
@@ -106,9 +110,11 @@ Behavior notes:
 
 At the top of `SelectionHistory.py`:
 
-- `MAX_HISTORY = 20` — how many distinct selection sets to remember. Deep enough
-  to survive a run of constraint operations, shallow enough that the held entity
-  references cannot accumulate meaningfully.
+- `MAX_HISTORY = 20` — how many distinct selection sets to remember per
+  document. Deep enough to survive a run of constraint operations, shallow
+  enough that the held entity references cannot accumulate meaningfully.
+- `MAX_DOCUMENTS = 10` — how many inactive documents keep a parked history.
+  A backstop for a close the API does not report; the oldest is dropped first.
 
 ## Requirements
 

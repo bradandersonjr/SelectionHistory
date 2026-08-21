@@ -18,9 +18,10 @@ in the stack is a whole finished selection, not a stage of one being assembled:
 a set that grows or shrinks from the newest entry replaces it in place, and only
 a genuinely different selection starts a new entry.
 
-History belongs to one document. Entities only mean anything inside the design
-that owns them, so switching documents discards the stack rather than risking a
-restore of references that are stale in the document now on screen.
+Each document keeps its own history. Entities only mean anything inside the
+design that owns them, so a set remembered in one is never restored into
+another; switching documents parks the current stack and swaps in whatever that
+document had, and closing one forgets it so its geometry is not held in memory.
 
 The command works whether or not something is currently selected. A live
 selection is treated as the point being stepped back from: if it matches the
@@ -57,12 +58,14 @@ _handlers = []
 _history = []
 _history_cursor = None
 
-# The document the history belongs to. Entities are only meaningful inside the
-# document that owns them, so a set remembered in one design must never be
-# restored into another — the references are stale there and reselecting them
-# fails or, worse, resolves to something unrelated. History is dropped whenever
-# the active document changes rather than kept per document, because holding
-# entity references from a closed document would keep it alive in memory.
+# Entities are only meaningful inside the document that owns them, so a set
+# remembered in one design must never be restored into another — the references
+# are stale there and reselecting them fails or, worse, resolves to something
+# unrelated. Each document therefore gets its own history, parked in _histories
+# while another document is on screen and swapped back when it returns.
+#
+# The stores are dropped on documentClosing, because holding entity references
+# from a closed document would keep the whole document alive in memory.
 #
 # Keyed on Document.creationId rather than on the Document object: Fusion
 # returns a new Python wrapper on each access, so comparing objects reports a
@@ -74,6 +77,10 @@ _history_cursor = None
 # open" never compares equal to the initial "nothing recorded yet" state.
 _NO_DOCUMENT = object()
 _history_document = _NO_DOCUMENT
+
+# creationId -> (history, cursor) for every document except the active one,
+# whose state lives in _history and _history_cursor above while it is on screen.
+_histories = {}
 
 # A restore edits the selection, which raises the very event the add-in listens
 # to. Left unguarded it would record its own work as fresh history and stepping
@@ -112,6 +119,12 @@ PANEL_IDS = ('SelectPanel', 'SketchSelectPanel')
 # accumulate meaningfully.
 MAX_HISTORY = 20
 
+# How many inactive documents keep a parked history. documentClosing normally
+# evicts a document's store, but that event can be missed — a crash, or a close
+# the API does not report — so this is the backstop that keeps a long session
+# from accumulating entity references indefinitely.
+MAX_DOCUMENTS = 10
+
 ADDIN_DIR = Path(__file__).resolve().parent
 RESOURCES_DIR = ADDIN_DIR / 'resources'
 
@@ -140,6 +153,14 @@ class SelectionHistoryDocumentActivatedHandler(
             # Clearing here rather than waiting for the next selection event
             # releases the old document's entity references promptly.
             _sync_history_document()
+        except Exception:
+            _log(traceback.format_exc())
+
+
+class SelectionHistoryDocumentClosingHandler(adsk.core.DocumentEventHandler):
+    def notify(self, args):
+        try:
+            forget_document(args)
         except Exception:
             _log(traceback.format_exc())
 
@@ -258,6 +279,10 @@ def _add_selection_watcher():
         _app.documentActivated.add(on_document)
         _handlers.append(on_document)
 
+        on_closing = SelectionHistoryDocumentClosingHandler()
+        _app.documentClosing.add(on_closing)
+        _handlers.append(on_closing)
+
         _log('Watching the active selection.')
     except Exception:
         _log(f'Failed to watch the selection: {traceback.format_exc()}')
@@ -280,6 +305,11 @@ def _remove_selection_watcher():
             elif isinstance(handler, SelectionHistoryDocumentActivatedHandler):
                 try:
                     _app.documentActivated.remove(handler)
+                except Exception:
+                    pass
+            elif isinstance(handler, SelectionHistoryDocumentClosingHandler):
+                try:
+                    _app.documentClosing.remove(handler)
                 except Exception:
                     pass
     except Exception:
@@ -314,6 +344,7 @@ def stop(context):
         _handlers.clear()
         _history.clear()
         _restored_entities.clear()
+        _histories.clear()
         _history_document = _NO_DOCUMENT
         _log('Add-in stopped.')
     except Exception:
@@ -415,13 +446,51 @@ def _sync_history_document():
     if document == _history_document:
         return
 
-    if _history:
-        _log('Active document changed; discarding the selection history.')
+    # Park the outgoing document's history so returning to it finds the stack
+    # intact. _NO_DOCUMENT is not a real document and never gets a store.
+    if _history_document is not _NO_DOCUMENT:
+        if _history:
+            _histories[_history_document] = (list(_history), _history_cursor)
+        else:
+            _histories.pop(_history_document, None)
 
-    _history.clear()
-    _history_cursor = None
+    parked, cursor = _histories.pop(document, ([], None)) \
+        if document is not _NO_DOCUMENT else ([], None)
+
+    # Rebind in place: the walk logic reads the module-level list directly.
+    _history[:] = parked
+    _history_cursor = cursor
     _restored_entities = []
     _history_document = document
+
+    if _history:
+        _log(f'Switched document; restored a history {len(_history)} deep.')
+
+
+def forget_document(args):
+    """Drops the stored history for a document that is closing."""
+    global _history_document, _history_cursor, _restored_entities
+
+    try:
+        # documentClosing still exposes the Document; documentClosed does not,
+        # which is why the eviction happens on the earlier event.
+        document = adsk.core.DocumentEventArgs.cast(args).document.creationId
+    except Exception:
+        _log('Could not identify the closing document; its history is kept '
+             'until the next document switch.')
+        return
+
+    _histories.pop(document, None)
+
+    if document == _history_document:
+        # The document being closed is the one on screen, so the working state
+        # refers to entities that are about to stop existing.
+        _history.clear()
+        _history_cursor = None
+        _restored_entities = []
+        _history_document = _NO_DOCUMENT
+
+    _log('Document closed; forgot its selection history.')
 
 
 def record_selection():

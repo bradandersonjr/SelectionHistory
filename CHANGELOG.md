@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Each document now keeps its own selection history instead of the stack being
+  discarded on every document switch. Switching parks the current history and
+  swaps in that document's own, so leaving a design and coming back finds it
+  intact. Closing a document forgets its history, and at most `MAX_DOCUMENTS`
+  inactive documents keep one as a backstop against a close the API does not
+  report.
+
 ### Fixed
 
 - History is no longer discarded on every selection event. The active document
