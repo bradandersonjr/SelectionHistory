@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "addin",
+  "id": "24dcffbe-1830-4217-a8d3-e49c0d38239b",
+  "author": "brad anderson jr.",
+  "description": {
+    "": "Restores a previous selection after it is cleared, stepping back through selection history one press at a time."
+  },
+  "version": "1.0.0",
+  "runOnStartup": true,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
