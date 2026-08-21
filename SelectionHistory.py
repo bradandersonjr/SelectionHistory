@@ -431,24 +431,17 @@ def _same_entities(left, right):
 
 def _is_same_entity(left, right):
     """Returns True when two entity references point at the same object."""
+    # Fusion's own equality is the only reliable test here. entityToken looks
+    # like a better key but is explicitly not one: the API documents that the
+    # same entity can hand back different token strings at different times, and
+    # that tokens must never be compared to decide what they represent. Doing
+    # so rejected valid entities — a spline handle read twice could compare as
+    # two different objects — which is worse than the identity check alone.
     try:
-        if left == right:
-            return True
+        return bool(left == right)
     except Exception:
         # Comparison itself can raise once one side has been invalidated.
         return False
-
-    # Two references to one entity are not always the same Python object, so
-    # fall back to the token Fusion uses to identify geometry across rebuilds.
-    # Not every entity exposes one, and reading it from a dead reference can
-    # raise, so a failure here just means "cannot prove they match".
-    try:
-        left_token = left.entityToken
-        right_token = right.entityToken
-    except Exception:
-        return False
-
-    return bool(left_token) and left_token == right_token
 
 
 def _is_within(candidate, existing):
@@ -685,8 +678,13 @@ def restore_selection():
 
             if added is None or not _is_same_entity(added, entity):
                 # Fusion substituted something else, so this is not the entity
-                # that was remembered. Drop it rather than selecting geometry
-                # the user never picked.
+                # that was remembered. Take the substitute back out: leaving it
+                # in place is what put the spline curve on screen instead of
+                # the handle that was actually picked.
+                try:
+                    selections.removeByIndex(selections.count - 1)
+                except Exception:
+                    _log('Could not remove a substituted entity.')
                 continue
 
             restored.append(entity)

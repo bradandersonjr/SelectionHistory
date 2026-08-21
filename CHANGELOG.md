@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A substituted entity is no longer left selected. When Fusion resolved a stale
+  reference to its parent — a spline handle to the whole curve — the substitute
+  was detected but never removed, so the curve stayed on screen anyway. It is
+  now taken back out with `removeByIndex`.
+- Entity comparison no longer falls back to comparing `entityToken` values. The
+  API documents that the same entity can return different tokens at different
+  times and that tokens must never be compared, which made valid spline handles
+  read as different entities and get rejected.
+
 ### Added
 
 - Selections made while a command is running are now captured. Fusion's
